@@ -76,6 +76,7 @@ Defines **what** the system must do -- its properties, constraints, and behavior
 - **Design Notes section** (final section) captures rationale, trade-offs, and context that inform the requirements but are not requirements themselves.
 - Requirements use **shall** for mandatory behavior, **should** for recommended behavior, and **may** for optional behavior.
 - Requirements do not specify implementation strategy -- that belongs in the design document.
+- **IMPORTANT: Never modify a requirements document without first discussing the proposed changes with the user and receiving explicit approval.** Requirements are formal, auditable documents. Even small changes (adding, removing, or rewording a requirement) must be reviewed and agreed upon before editing.
 
 Example:
 

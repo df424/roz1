@@ -1,8 +1,8 @@
-# Robotic Head Controller - Requirements Document
+# ROZ Embedded Controller (roz_firmware) - Requirements Document
 
 ## 1. Overview
 
-This document defines the requirements for an embedded controller firmware for a robotic head. The robot head serves as a home assistant with actuated features (neck, eyes, jaw), audio input/output, and a camera. The controller receives commands from and transmits sensor data to a remote base station.
+This document defines the requirements for the embedded controller firmware. The controller manages actuators, sensors, and peripherals on a single subsystem of the robot (e.g., head, arm, leg). It receives commands from and transmits sensor data to a host via the shared wire protocol.
 
 ### 1.1 Scope
 
@@ -139,11 +139,13 @@ This hardware configuration is for reference only. The firmware design shall not
 
 ### 2.8 Latency
 
-**R22 - Low Latency Operation**: The system shall be designed to minimize latency across all paths (command execution, audio, video) such that the robotic head behaves as an embodied presence rather than a remote-controlled device. Buffering and processing strategies shall prioritize responsiveness.
+**R22 - Low Latency Operation**: The system shall be designed to minimize latency across all paths (command execution, audio, video) such that the robot behaves as an embodied presence rather than a remote-controlled device. Buffering and processing strategies shall prioritize responsiveness.
+
+**R23 - Update Loop Period**: The controller's main loop shall execute at a period of 1 ms or less. All tick functions (actuator interpolation, sync management, telemetry, system monitoring) shall complete within this period. This ensures smooth actuator interpolation and responsive command processing.
 
 ### 2.9 Actuator Behavior
 
-**R23 - Actuator Hold Behavior**: Each actuator's configuration shall declare a hold behavior defining what occurs when the actuator reaches its target and the command queue is empty:
+**R24 - Actuator Hold Behavior**: Each actuator's configuration shall declare a hold behavior defining what occurs when the actuator reaches its target and the command queue is empty:
   - (a) **Active hold**: Maintain position, drawing power as needed (e.g., servo holding torque).
   - (b) **Passive release**: De-energize the actuator, allowing it to move freely (e.g., to save power or reduce wear).
 
@@ -151,29 +153,29 @@ This hardware configuration is for reference only. The firmware design shall not
 
 ### 2.10 Power Management
 
-**R24 - Low Power Operation**: The controller shall utilize low-power modes whenever possible, including but not limited to: clock gating unused peripherals, entering sleep states during idle periods, and de-energizing actuators according to their hold behavior (R23). Detailed power management strategies shall be developed as the design matures.
+**R25 - Low Power Operation**: The controller shall utilize low-power modes whenever possible, including but not limited to: clock gating unused peripherals, entering sleep states during idle periods, and de-energizing actuators according to their hold behavior (R24). Detailed power management strategies shall be developed as the design matures.
 
 ### 2.11 Connection Lifecycle
 
-**R25 - Disconnect Behavior**: Upon detecting loss of communication with the base station, the controller shall execute a configurable stored procedure (e.g., return actuators to default positions, enter idle pose, de-energize). The stored procedure shall be defined at compile time with provisions for future runtime configurability.
+**R26 - Disconnect Behavior**: Upon detecting loss of communication with the base station, the controller shall execute a configurable stored procedure (e.g., return actuators to default positions, enter idle pose, de-energize). The stored procedure shall be defined at compile time with provisions for future runtime configurability.
 
-**R26 - Reconnect State Push**: Upon re-establishing communication with the base station, the controller shall immediately transmit its full current state, including: all actuator positions and statuses, sensor statuses, fault conditions, POST results, and the currently loaded configuration.
+**R27 - Reconnect State Push**: Upon re-establishing communication with the base station, the controller shall immediately transmit its full current state, including: all actuator positions and statuses, sensor statuses, fault conditions, POST results, and the currently loaded configuration.
 
 ### 2.12 Command Synchronization
 
-**R27 - Internal Command Synchronization**: The controller shall maintain an internal time base sufficient to synchronize commands across actuators and devices. Coordinated behaviors (e.g., jaw movement synchronized with audio output) shall be achieved by the base station sending incremental commands aligned with data packets (e.g., jaw position updates accompanying each audio chunk). Cross-system clock synchronization is handled separately (see R30).
+**R28 - Internal Command Synchronization**: The controller shall maintain an internal time base sufficient to synchronize commands across actuators and devices. Coordinated behaviors (e.g., jaw movement synchronized with audio output) shall be achieved by the host sending incremental commands aligned with data packets (e.g., jaw position updates accompanying each audio chunk). Cross-system clock synchronization is handled separately (see R31).
 
 ### 2.13 Protocol Versioning
 
-**R28 - Protocol Version Handshake**: At connection establishment, the controller and base station shall exchange protocol version identifiers. The controller shall reject communication from an incompatible protocol version and report the mismatch via telemetry and LED indication.
+**R29 - Protocol Version Handshake**: At connection establishment, the controller and host shall exchange protocol version identifiers. The controller shall reject communication from an incompatible protocol version and report the mismatch via telemetry and LED indication.
 
-### 2.14 System-Level (Base Station)
+### 2.14 Transport
 
-**R29 - ROS2 Integration**: The base station shall use ROS2. A ROS2 driver node shall translate between ROS2 topics/services and the controller's wire protocol (R14). This driver is outside the scope of this firmware project but the command protocol design shall facilitate straightforward ROS2 mapping.
+**R30 - Initial Transport**: The first transport implementation shall be UART. The PAL transport interface (R1, R13) shall be implemented over UART as the reference transport for development and testing. The UART configuration (baud rate, pin assignment) shall be defined in the platform abstraction layer.
 
 ### 2.15 Clock Synchronization
 
-**R30 - Cross-System Clock Synchronization**: The controller shall support hardware-assisted clock synchronization with the companion computer to enable correlation of controller telemetry with SBC-side data (e.g., video frames, audio timestamps). The mechanism shall use:
+**R31 - Cross-System Clock Synchronization**: The controller shall support hardware-assisted clock synchronization with the companion computer to enable correlation of controller telemetry with SBC-side data (e.g., video frames, audio timestamps). The mechanism shall use:
   - (a) A dedicated GPIO sync line between the companion computer and the controller.
   - (b) A hardware timer input capture on the controller to timestamp incoming sync pulses with cycle-accurate precision, independent of software latency.
   - (c) A protocol exchange where the companion computer reports its own timestamp for the pulse, and the controller reports its hardware-captured timestamp, enabling the companion to compute the clock offset.
@@ -189,18 +191,14 @@ This hardware configuration is for reference only. The firmware design shall not
 
 The controller uses a custom binary protocol (R14) rather than ROS2-native serialization (CDR/DDS). The target MCU lacks the resources for micro-ROS (~32KB RAM minimum vs. 8KB available). A ROS2 driver node on the companion computer or base station will translate between the custom protocol and ROS2 topics/services. This keeps the embedded firmware simple and transport-agnostic.
 
-### 3.2 Companion Computer Architecture
-
-The reference deployment places an NVIDIA Jetson (or similar) as a companion computer co-located in the robot. This companion handles media streaming (camera, microphone, speaker), ROS2 communication, and may eventually serve as the base station itself. The embedded controller communicates with the companion over UART, SPI, or USB. The protocol design (R14) is independent of this physical transport.
-
-### 3.3 Future: Self-Describing Robots
+### 3.2 Future: Self-Describing Robots
 
 The current design assumes device configuration is known at compile time (R4). A future revision should consider a discovery protocol where the controller advertises its actuator and sensor inventory to the base station at connection time. This would enable a generic base station / ROS2 driver that works with any robot conforming to the protocol, rather than requiring per-robot configuration. ROS2's parameter and discovery infrastructure could support this naturally.
 
-### 3.4 Firmware Update
+### 3.3 Firmware Update
 
 Firmware update (e.g., bootloader support) is out of scope for the initial design. It can be added later as a separate concern.
 
-### 3.5 MCU Constraints
+### 3.4 MCU Constraints
 
 The current target MCU (STM32L031K6, 32KB Flash, 8KB RAM) is severely resource-constrained. Streaming audio/video and running multiple interpolation loops concurrently may require upgrading to a more capable MCU, or offloading media streaming to the companion processor. The hardware abstraction layer (R1) supports this architectural flexibility.
