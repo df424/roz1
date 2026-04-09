@@ -12,7 +12,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 roz1/
 ├── CLAUDE.md               # this file -- repo-wide guidance
 ├── roz_docs/               # all documentation (requirements, design, protocol spec)
-│   ├── index.md            # documentation entry point
+│   ├── README.md           # documentation entry point
 │   ├── system/             # system-level architecture
 │   ├── protocol/           # wire protocol specification
 │   ├── controller/         # embedded firmware requirements & design
@@ -146,7 +146,7 @@ Build system TBD (CMake planned). Not yet implemented.
 
 | Document | Path |
 |---|---|
-| Documentation index | `roz_docs/index.md` |
+| Documentation index | `roz_docs/README.md` |
 | System architecture | `roz_docs/system/architecture.md` |
 | Wire protocol spec | `roz_docs/protocol/wire_protocol.md` |
 | Firmware requirements | `roz_docs/controller/requirements.md` |

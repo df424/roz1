@@ -15,7 +15,7 @@ The firmware is hardware-independent by design. All actuator types (servos, step
 
 ## Documentation
 
-Project documentation lives in the central [roz_docs](../roz_docs/index.md) directory:
+Project documentation lives in the central [roz_docs](../roz_docs/README.md) directory:
 
 - [Requirements](../roz_docs/controller/requirements.md) -- system requirements, hardware abstraction model, actuator/sensor models, safety, and communication requirements
 - [Communication Protocol](../roz_docs/protocol/wire_protocol.md) -- binary wire protocol specification: COBS framing, message catalog, stream management, version handshake, and clock synchronization
