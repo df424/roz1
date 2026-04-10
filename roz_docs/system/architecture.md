@@ -12,6 +12,14 @@ This document serves as the entry point for the Roz project. It establishes the 
 
 ## 2. System Topology
 
+### 2.1 Deployment Configurations
+
+The system supports two deployment configurations. The host library and protocol library are identical in both. The difference is where the software stack runs, which transports are available, and whether the AI system is present.
+
+#### (a) Direct Connection (Development)
+
+The development machine connects to the robot's controller(s) directly over UART or USB. The host library, UI, and any ROS2 nodes run on the development machine. The AI system (roz_ai) does not run in this configuration -- it requires the SBC's GPU. This is the primary development and testing configuration.
+
 ```
                           ┌─────────────────────────────────────┐
                           │         Development Machine         │
@@ -39,8 +47,7 @@ This document serves as the entry point for the Roz project. It establishes the 
                           │                  ▼                  │
                           │  ┌────────────────────────────────┐ │
                           │  │    Embedded Controller(s)      │ │
-                          │  │    (roz_firmware, etc.)  │ │
-                          │  │    links roz_proto             │ │
+                          │  │    (roz_firmware + roz_proto)   │ │
                           │  └──────────┬─────────────────────┘ │
                           │             │                       │
                           │         actuators, sensors,         │
@@ -48,15 +55,55 @@ This document serves as the entry point for the Roz project. It establishes the 
                           └─────────────────────────────────────┘
 ```
 
-### 2.1 Deployment Configurations
+#### (b) SBC-Hosted (Production)
 
-The system supports two deployment configurations:
+A single-board computer (NVIDIA Jetson Orin Nano) is co-located in the robot. The SBC runs the AI system, host library, and ROS2 nodes. The operator connects to the SBC over the network via roz_ui. The SBC provides GPIO-based hardware clock synchronization with the controller(s).
 
-**(a) Direct connection (development):** The development machine connects to the robot's controller(s) directly over UART or USB. The host library, UI, and any ROS2 nodes run on the development machine. This is the primary development and testing configuration.
-
-**(b) SBC-hosted (production):** A single-board computer (e.g., NVIDIA Jetson) is co-located in the robot. The SBC runs the host library, ROS2 nodes, and handles media streaming (camera, microphone, speaker). The development machine connects to the SBC over the network. In this configuration, the SBC may also provide GPIO-based hardware clock synchronization with the controller(s).
-
-The host library and protocol library are identical in both configurations. The difference is transport selection (local UART vs. USB) and whether GPIO-based clock sync is available.
+```
+  ┌───────────────────────────┐
+  │     Operator Machine      │
+  │                           │
+  │  ┌─────────────────────┐  │
+  │  │       roz_ui        │  │
+  │  │     (Textual)       │  │
+  │  └──────────┬──────────┘  │
+  └─────────────┼─────────────┘
+                │ network (roz_host Python API)
+  ┌─────────────┼──────────────────────────────────────┐
+  │   Robot     │                                      │
+  │             ▼                                      │
+  │   ┌────────────────────────────────────────────┐   │
+  │   │        SBC (Jetson Orin Nano)              │   │
+  │   │                                            │   │
+  │   │   ┌────────────┐       ┌──────────────┐    │   │
+  │   │   │   roz_ai   │       │  ROS2 nodes  │    │   │
+  │   │   │  (Gemma4)  │       │  (future)    │    │   │
+  │   │   └──────┬─────┘       └──────┬───────┘    │   │
+  │   │          │   Python API       │            │   │
+  │   │          ▼                    ▼            │   │
+  │   │   ┌────────────────────────────────────┐   │   │
+  │   │   │           roz_host                 │   │   │
+  │   │   │    (host library, multi-ctrl)      │   │   │
+  │   │   └──────────────────┬─────────────────┘   │   │
+  │   │                      │                     │   │
+  │   │   ┌──────────────────┴─────────────────┐   │   │
+  │   │   │           roz_proto                │   │   │
+  │   │   │    (shared protocol library)       │   │   │
+  │   │   └──────────────────┬─────────────────┘   │   │
+  │   └──────────────────────┼─────────────────────┘   │
+  │                          │ UART (+ GPIO sync)      │
+  │   ┌──────────────────────┼─────────────────────┐   │
+  │   │                      ▼                     │   │
+  │   │   ┌────────────────────────────────────┐   │   │
+  │   │   │      Embedded Controller(s)        │   │   │
+  │   │   │   (roz_firmware + roz_proto)       │   │   │
+  │   │   └──────────────┬─────────────────────┘   │   │
+  │   │                  │                         │   │
+  │   │          actuators, sensors,               │   │
+  │   │          speaker, mic, camera              │   │
+  │   └────────────────────────────────────────────┘   │
+  └────────────────────────────────────────────────────┘
+```
 
 ---
 
@@ -141,7 +188,7 @@ Key components:
 
 Terminal-based UI for robot operation. Displays telemetry, allows manual actuator control, shows system status, and provides AI system debug visibility. Communicates with controllers through roz_host's Python API.
 
-**Requirements:** [ui/requirements.md](../ui/requirements.md) *(to be written)*
+**Requirements:** [ui/requirements.md](../ui/requirements.md)
 
 ---
 
@@ -235,7 +282,39 @@ Both strategies produce the same output: a clock offset that maps controller tim
 
 ---
 
-## 7. ROS2 Integration
+## 7. AI System
+
+The AI system (roz_ai) is the robot's cognitive core. It runs on the SBC (Jetson Orin Nano) and operates a continuous perception-reasoning-action loop for the full duration the robot is powered on.
+
+```
+  ┌───────────────────────────────────────────────────────────┐
+  │                     roz_ai (SBC)                          │
+  │                                                           │
+  │  audio, video,    ┌──────────────┐    actuator commands,  │
+  │  telemetry ──────▶│  Multimodal  │──────▶ speech audio,   │
+  │  (via roz_host)   │  LLM (Gemma4)│      expressions      │
+  │                   └──────┬───────┘      (via roz_host)    │
+  │                          │                                │
+  │          ┌───────────────┼───────────────┐                │
+  │          ▼               ▼               ▼                │
+  │    ┌──────────┐   ┌───────────┐   ┌───────────┐          │
+  │    │ Behavior │   │    TTS    │   │   Motor   │          │
+  │    │ Manager  │   │ Pipeline  │   │  Skills   │          │
+  │    └──────────┘   └───────────┘   └───────────┘          │
+  └───────────────────────────────────────────────────────────┘
+```
+
+The perception pipeline fuses audio, camera frames, and controller telemetry into a multimodal context for each inference cycle. The LLM produces structured output that the action generation layer parses into motor commands, speech, and expressions, all executed through roz_host's Python API.
+
+The system has no wake word or activation trigger -- it maintains continuous sensory awareness, manages conversational state, and generates idle behaviors when not actively engaged. A behavior manager governs personality, attention, and turn-taking. A safety layer filters LLM output before it reaches the actuators.
+
+All GPU-intensive workloads (LLM inference, TTS) run on the Jetson's GPU. The system manages shared GPU scheduling between these pipelines.
+
+**Requirements:** [ai/requirements.md](../ai/requirements.md)
+
+---
+
+## 8. ROS2 Integration
 
 ROS2 is a system-level concern, not owned by any single project. The integration path:
 
@@ -263,7 +342,7 @@ The ROS2 driver node is out of scope for now. The design of roz_host should faci
 
 ---
 
-## 8. Documentation Map
+## 9. Documentation Map
 
 All project documentation lives in this repository (`roz_docs/`):
 
@@ -275,26 +354,27 @@ All project documentation lives in this repository (`roz_docs/`):
 | `controller/module_design.md` | Embedded controller module and type design. |
 | `proto_lib/requirements.md` | Shared protocol library requirements. |
 | `host_lib/requirements.md` | Base station host library requirements. |
-| `ui/requirements.md` | Operator UI requirements (future). |
+| `ai/requirements.md` | AI system requirements. |
+| `ui/requirements.md` | Operator UI requirements. |
 
 Individual project repositories contain only code, build configuration, and a project-level CLAUDE.md for tooling guidance. They do not contain requirements or design documents.
 
 ---
 
-## 9. Design Notes
+## 10. Design Notes
 
-### 9.1 Why a Shared Protocol Library
+### 10.1 Why a Shared Protocol Library
 
 Earlier designs had the controller firmware and base station each implementing their own protocol parsing. This creates a maintenance burden and a class of bugs where the two sides disagree on message layout, field order, or enum values. A single shared implementation eliminates this. The cost -- building a portable C library that works on both Cortex-M0+ and Linux -- is low, since the protocol layer is already pure C with no OS dependencies.
 
-### 9.2 Why C
+### 10.2 Why C
 
 The embedded controller requires C (bare metal Cortex-M0+, 8KB RAM). The shared protocol library must therefore be C. The host library is also C to provide the cleanest possible Python FFI surface (no C++ name mangling, no Rust toolchain dependency). The UI is Python, using the host library via cffi or ctypes.
 
-### 9.3 Multi-Controller vs. Multi-Robot
+### 10.3 Multi-Controller vs. Multi-Robot
 
 The system is designed for one robot with multiple controllers, not multiple robots. Each controller manages a disjoint set of actuators/sensors on the same physical robot. Cross-robot coordination (if ever needed) would be handled at the ROS2 layer, not in roz_host.
 
-### 9.4 Naming
+### 10.4 Naming
 
 "Roz" is the robot's name. Project prefixes use `roz_` for consistency. The wire protocol and shared library use `roz_proto` to distinguish from the higher-level host library.
