@@ -33,4 +33,4 @@ This documentation covers the full system design, wire protocol specification, a
 
 ## Operator Interface (roz_ui)
 
-- [Requirements](ui/requirements.md) -- *(planned)* Terminal-based UI for robot operation. Telemetry display, manual actuator control, system status.
+- [Requirements](ui/requirements.md) -- Terminal-based operator UI (Textual). Multi-robot dashboard, hierarchical drill-down views (robots, controllers, actuators, sensors), real-time pushed telemetry, k9s-style navigation.

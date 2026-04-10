@@ -70,7 +70,18 @@ Defines **what** the system must do -- its properties, constraints, and behavior
 **Format:**
 
 - **Numbered sections** organize requirements by domain (e.g., `### 2.1 Hardware Abstraction`, `### 2.3 Communication`).
-- **R-numbered requirements** state individual properties. Each requirement has a unique ID that is stable across revisions. Format: `**R<number> - <Short Name>**: <requirement text>`.
+- **Prefixed R-numbered requirements** state individual properties. Each requirement has a unique ID that is stable across revisions. The ID is prefixed with a project code to disambiguate requirements across documents. Format: `**<PREFIX>-R<number> - <Short Name>**: <requirement text>`.
+- **Project prefixes** are assigned per requirements document:
+
+  | Document | Prefix | Example |
+  |---|---|---|
+  | Controller (roz_firmware) | `CTRL` | `CTRL-R1` |
+  | Proto lib (roz_proto) | `PROTO` | `PROTO-R1` |
+  | Host lib (roz_host) | `HOST` | `HOST-R1` |
+  | AI system (roz_ai) | `AI` | `AI-R1` |
+  | Operator UI (roz_ui) | `UI` | `UI-R1` |
+
+  **Note:** The host lib requirements document has not yet been created. New requirements documents shall use prefixed IDs from the start.
 - **Sub-items** use `(a)`, `(b)`, `(c)` lettering for enumerated properties within a requirement.
 - **Overview section** (Section 1) establishes scope, system context, and references to other documents.
 - **Design Notes section** (final section) captures rationale, trade-offs, and context that inform the requirements but are not requirements themselves.
@@ -83,11 +94,11 @@ Example:
 ```markdown
 ### 2.1 Framing
 
-**R1 - COBS Encoding**: The library shall encode all outgoing frames and decode all
+**PROTO-R1 - COBS Encoding**: The library shall encode all outgoing frames and decode all
 incoming frames using Consistent Overhead Byte Stuffing (COBS), as defined in
 [wire_protocol.md](../protocol/wire_protocol.md) Section 2.1.
 
-**R2 - Frame Integrity**: The library shall:
+**PROTO-R2 - Frame Integrity**: The library shall:
   - (a) Compute a CRC-16/CCITT checksum over the header and payload of every outgoing frame.
   - (b) Validate the CRC-16/CCITT checksum of every incoming frame.
   - (c) Report frames with invalid checksums to the caller via error callback.

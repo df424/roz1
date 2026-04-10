@@ -127,7 +127,7 @@ The system is always on -- no wake word or activation trigger. It maintains cont
 Key components:
 - Perception pipeline (audio, vision, telemetry preprocessing)
 - Core reasoning (Gemma4 multimodal LLM inference)
-- Action generation (motion primitives, jaw synchronization)
+- Action generation (motor skills via control policies, jaw synchronization)
 - TTS pipeline (on-device text-to-speech)
 - Behavior manager (personality, conversation state, attention)
 - Safety layer (content filtering, command validation)
@@ -209,7 +209,7 @@ Two clock synchronization strategies are supported, selectable at connection tim
 
 Available when the host is an SBC with GPIO access to the controller. The SBC drives a hardware sync pulse, and the controller latches it with a timer input capture. Achieves microsecond-level accuracy.
 
-This is the mechanism defined in [wire_protocol.md](../protocol/wire_protocol.md) Section 7.7 and controller requirement R30. Requires:
+This is the mechanism defined in [wire_protocol.md](../protocol/wire_protocol.md) Section 7.7 and controller requirement CTRL-R30. Requires:
 - Physical GPIO connection between SBC and controller
 - Linux GPIO access on the host (e.g., libgpiod)
 - Timer input capture configured on the controller

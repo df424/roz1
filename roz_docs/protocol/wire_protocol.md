@@ -599,10 +599,10 @@ For clips exceeding the max frame size, this message uses fragmented transfer (S
 
 If either side detects communication loss (implementation-defined timeout with no valid frames received), it shall:
 
-- **Controller**: Execute its configured disconnect stored procedure (R25). Continue indicating status via LED.
+- **Controller**: Execute its configured disconnect stored procedure (CTRL-R25). Continue indicating status via LED.
 - **Base station**: Mark the controller as disconnected and cease sending commands.
 
-On reconnection, the full version handshake (Section 5) is repeated. After a successful handshake, the controller pushes its full state (R26) via ActuatorTelemetry, SensorTelemetry, SystemTelemetry, and PostResult messages.
+On reconnection, the full version handshake (Section 5) is repeated. After a successful handshake, the controller pushes its full state (CTRL-R26) via ActuatorTelemetry, SensorTelemetry, SystemTelemetry, and PostResult messages.
 
 ---
 
