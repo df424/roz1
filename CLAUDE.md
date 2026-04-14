@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**ROZ (Robot Orchestration Zero)** is a robotic home assistant platform. The system comprises embedded controllers for actuator/sensor management, a shared protocol library, a host-side communications library, a compound AI system (multimodal LLM), and an operator interface. All projects live in this monorepo and communicate via a custom binary protocol.
+**ROZ (Robot Orchestration Zero)** is a robotic home assistant platform. The system comprises embedded controllers for actuator/sensor management, a shared protocol library, a C/C++ motor control runtime, a Python server daemon, a compound AI system (multimodal LLM), and an operator interface. All projects live in this monorepo and communicate via a custom binary protocol.
 
 ## Repository Structure
 
@@ -17,12 +17,14 @@ roz1/
 │   ├── protocol/           # wire protocol specification
 │   ├── controller/         # embedded firmware requirements & design
 │   ├── proto_lib/          # shared protocol library requirements & design
-│   ├── host_lib/           # host library requirements & design
+│   ├── control/            # motor control runtime requirements & design
+│   ├── server/             # server daemon requirements & design
 │   ├── ai/                 # AI system requirements & design
 │   └── ui/                 # operator UI requirements & design
 ├── roz_firmware/           # embedded controller firmware (C, bare metal, STM32)
 ├── roz_proto/              # shared protocol library (C, portable, no OS deps)
-├── roz_host/               # base station host library (C, Linux, Python bindings)
+├── roz_control/            # motor control runtime (C/C++, Linux, pure C API)
+├── roz_server/             # server daemon (Python, hosts AI, serves UI) [future]
 ├── roz_ai/                 # compound AI system (Python, Gemma4, Jetson) [future]
 └── roz_ui/                 # operator terminal UI (Python, Textual) [future]
 ```
@@ -30,24 +32,31 @@ roz1/
 ### Project Dependency Graph
 
 ```
-roz_ai (Python, SBC)       roz_ui (Python)
-    │                          │
-    │ Python API               │ Python API
-    ├──────────────┬───────────┘
-    │              │
-    ▼              ▼
-roz_host (C, Linux)
-    │ C API
+roz_ui (Python)
+    │
+    │ network
     ▼
-roz_proto (C, portable)
+roz_server (Python, SBC)
+    │
+    │ hosts
+    ▼
+roz_ai (Python, optional)
+    │
+    │ via roz_server
+    ▼
+roz_control (C/C++, .so)  ◄── loaded via C ABI (ctypes)
+    │
+    │ links
+    ▼
+roz_proto (C, portable, .a)
     │               │
     │ link/include  │ link/include
     ▼               ▼
-roz_host          roz_firmware
+roz_control       roz_firmware
 (internals)       (embedded)
 ```
 
-Dependencies flow strictly downward. roz_proto has zero OS or hardware dependencies.
+Dependencies flow strictly downward. roz_proto has zero OS or hardware dependencies. roz_control exposes a pure C API — roz_server loads it via ctypes.
 
 ### Project Summary
 
@@ -55,7 +64,8 @@ Dependencies flow strictly downward. roz_proto has zero OS or hardware dependenc
 |---|---|---|---|
 | roz_firmware | C (bare metal) | Cortex-M0+ (STM32L031K6) | .elf |
 | roz_proto | C99 (no extensions) | Portable (bare metal + Linux) | .a (static lib) |
-| roz_host | C99 (POSIX) | Linux (x86_64, aarch64) | .so (shared), .a (static) |
+| roz_control | C/C++ (POSIX) | Linux (x86_64, aarch64) | .so (shared), .a (static) |
+| roz_server | Python | Jetson Orin Nano / Linux x86_64 | Python package |
 | roz_ai | Python | Jetson Orin Nano (aarch64) | Python package |
 | roz_ui | Python | Linux | Python package |
 
@@ -75,13 +85,14 @@ Defines **what** the system must do -- its properties, constraints, and behavior
 
   | Document | Prefix | Example |
   |---|---|---|
-  | Controller (roz_firmware) | `CTRL` | `CTRL-R1` |
+  | Controller (roz_firmware) | `MCU` | `MCU-R1` |
   | Proto lib (roz_proto) | `PROTO` | `PROTO-R1` |
-  | Host lib (roz_host) | `HOST` | `HOST-R1` |
+  | Control runtime (roz_control) | `CTRL` | `CTRL-R1` |
+  | Server daemon (roz_server) | `SRV` | `SRV-R1` |
   | AI system (roz_ai) | `AI` | `AI-R1` |
   | Operator UI (roz_ui) | `UI` | `UI-R1` |
 
-  **Note:** The host lib requirements document has not yet been created. New requirements documents shall use prefixed IDs from the start.
+  **Note:** The control runtime and server daemon requirements documents have not yet been created. New requirements documents shall use prefixed IDs from the start.
 - **Sub-items** use `(a)`, `(b)`, `(c)` lettering for enumerated properties within a requirement.
 - **Overview section** (Section 1) establishes scope, system context, and references to other documents.
 - **Design Notes section** (final section) captures rationale, trade-offs, and context that inform the requirements but are not requirements themselves.
@@ -125,12 +136,12 @@ Every requirement should be traceable to at least one design element. Every desi
 
 ## Code Conventions
 
-### C Code (roz_firmware, roz_proto, roz_host)
+### C/C++ Code (roz_firmware, roz_proto, roz_control)
 
-- **Standard:** C99, no compiler-specific extensions in shared code (roz_proto).
+- **Standard:** C99 for roz_proto and roz_firmware (no compiler-specific extensions in roz_proto). C++ (C++17 or later) for roz_control's motor control runtime; roz_control's public API is pure C (`extern "C"`).
 - **Naming:** `snake_case` for functions and variables, `UPPER_SNAKE_CASE` for constants and macros, `type_name_t` suffix for typedefs.
-- **Prefix:** Public API functions use project prefix (`roz_proto_`, `roz_host_`). Internal/static functions do not need a prefix.
-- **No dynamic allocation** in roz_proto or roz_firmware. roz_host may use malloc for connection management.
+- **Prefix:** Public API functions use project prefix (`roz_proto_`, `roz_control_`). Internal/static functions do not need a prefix.
+- **No dynamic allocation** in roz_proto or roz_firmware. roz_control may use malloc/new for connection management and policy containers.
 - **State passing:** Functions receive state via pointer to caller-owned context structs. No file-scoped static mutable state in roz_proto (required for re-entrancy and multi-instance use).
 
 ### Python Code (roz_ai, roz_ui)
@@ -150,7 +161,7 @@ Toolchain: `arm-none-eabi-gcc`. See `roz_firmware/CLAUDE.md` for peripheral map,
 
 **Note:** CubeMX artifacts use legacy name `servo_controller_1`. The project has been renamed to `roz_firmware`.
 
-### roz_proto, roz_host
+### roz_proto, roz_control
 
 Build system TBD (CMake planned). Not yet implemented.
 
@@ -164,5 +175,5 @@ Build system TBD (CMake planned). Not yet implemented.
 | Firmware requirements | `roz_docs/controller/requirements.md` |
 | Firmware module design | `roz_docs/controller/module_design.md` |
 | Proto lib requirements | `roz_docs/proto_lib/requirements.md` |
-| Host lib requirements | `roz_docs/host_lib/requirements.md` *(in progress)* |
+| Control runtime requirements | `roz_docs/control/requirements.md` *(planned)* |
 | AI system requirements | `roz_docs/ai/requirements.md` |

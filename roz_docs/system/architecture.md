@@ -2,7 +2,7 @@
 
 ## 1. Overview
 
-ROZ (Robot Orchestration Zero) is a robotic home assistant platform with actuated features (head with neck, eyes, jaw), audio I/O, and a camera. The system is composed of multiple projects in a single monorepo that communicate via a custom binary protocol. This document defines the system-level architecture, project relationships, and deployment topology.
+ROZ (Robot Orchestration Zero) is a robotic home assistant platform with actuated features (head with neck, eyes, jaw), audio I/O, and a camera. The system is composed of multiple projects in a single monorepo that communicate via a custom binary protocol. A C/C++ motor control runtime handles real-time actuator control at 1000Hz, while a Python server daemon hosts the AI system and serves the operator UI. This document defines the system-level architecture, project relationships, and deployment topology.
 
 ### 1.1 Purpose
 
@@ -18,7 +18,7 @@ The system supports two deployment configurations. The host library and protocol
 
 #### (a) Direct Connection (Development)
 
-The development machine connects to the robot's controller(s) directly over UART or USB. The host library, UI, and any ROS2 nodes run on the development machine. The AI system (roz_ai) does not run in this configuration -- it requires the SBC's GPU. This is the primary development and testing configuration.
+The development machine connects to the robot's controller(s) directly over UART or USB. The control runtime, server, and UI run on the development machine. The AI system (roz_ai) does not run in this configuration -- it requires the SBC's GPU. This is the primary development and testing configuration.
 
 ```
                           ┌─────────────────────────────────────┐
@@ -29,16 +29,19 @@ The development machine connects to the robot's controller(s) directly over UART
                           │  │  roz_ui   │    │  ROS2 nodes  │  │
                           │  │ (Textual) │    │  (future)    │  │
                           │  └─────┬─────┘    └──────┬───────┘  │
-                          │        │                 │          │
+                          │        │ network         │          │
                           │        ▼                 ▼          │
                           │  ┌────────────────────────────────┐ │
-                          │  │          roz_host              │ │
-                          │  │  (host library, multi-ctrl)    │ │
+                          │  │        roz_server              │ │
+                          │  │  (daemon, no AI in dev mode)   │ │
                           │  └───────────────┬────────────────┘ │
-                          │                  │                  │
+                          │                  │ C ABI            │
                           │  ┌───────────────┴────────────────┐ │
-                          │  │          roz_proto             │ │
-                          │  │  (shared protocol library)     │ │
+                          │  │        roz_control             │ │
+                          │  │  (motor control runtime)       │ │
+                          │  │  ┌──────────────────────────┐  │ │
+                          │  │  │       roz_proto          │  │ │
+                          │  │  └──────────────────────────┘  │ │
                           │  └───────────────┬────────────────┘ │
                           └──────────────────┼──────────────────┘
                                              │ UART / USB
@@ -57,7 +60,7 @@ The development machine connects to the robot's controller(s) directly over UART
 
 #### (b) SBC-Hosted (Production)
 
-A single-board computer (NVIDIA Jetson Orin Nano) is co-located in the robot. The SBC runs the AI system, host library, and ROS2 nodes. The operator connects to the SBC over the network via roz_ui. The SBC provides GPIO-based hardware clock synchronization with the controller(s).
+A single-board computer (NVIDIA Jetson Orin Nano) is co-located in the robot. The SBC runs the server daemon (which hosts the AI system and loads the control runtime), plus any ROS2 nodes. The operator connects to the SBC over the network via roz_ui. The SBC provides GPIO-based hardware clock synchronization with the controller(s).
 
 ```
   ┌───────────────────────────┐
@@ -68,27 +71,31 @@ A single-board computer (NVIDIA Jetson Orin Nano) is co-located in the robot. Th
   │  │     (Textual)       │  │
   │  └──────────┬──────────┘  │
   └─────────────┼─────────────┘
-                │ network (roz_host Python API)
+                │ network
   ┌─────────────┼──────────────────────────────────────┐
   │   Robot     │                                      │
   │             ▼                                      │
   │   ┌────────────────────────────────────────────┐   │
   │   │        SBC (Jetson Orin Nano)              │   │
   │   │                                            │   │
-  │   │   ┌────────────┐       ┌──────────────┐    │   │
-  │   │   │   roz_ai   │       │  ROS2 nodes  │    │   │
-  │   │   │  (Gemma4)  │       │  (future)    │    │   │
-  │   │   └──────┬─────┘       └──────┬───────┘    │   │
-  │   │          │   Python API       │            │   │
-  │   │          ▼                    ▼            │   │
   │   │   ┌────────────────────────────────────┐   │   │
-  │   │   │           roz_host                 │   │   │
-  │   │   │    (host library, multi-ctrl)      │   │   │
-  │   │   └──────────────────┬─────────────────┘   │   │
-  │   │                      │                     │   │
-  │   │   ┌──────────────────┴─────────────────┐   │   │
-  │   │   │           roz_proto                │   │   │
-  │   │   │    (shared protocol library)       │   │   │
+  │   │   │         roz_server                 │   │   │
+  │   │   │  (daemon, serves UI, hosts AI)     │   │   │
+  │   │   │                                    │   │   │
+  │   │   │   ┌────────────┐  ┌────────────┐   │   │   │
+  │   │   │   │   roz_ai   │  │ ROS2 nodes │   │   │   │
+  │   │   │   │  (Gemma4)  │  │ (future)   │   │   │   │
+  │   │   │   └──────┬─────┘  └─────┬──────┘   │   │   │
+  │   │   │          │              │           │   │   │
+  │   │   └──────────┼──────────────┼───────────┘   │   │
+  │   │              │              │               │   │
+  │   │              ▼   C ABI     ▼               │   │
+  │   │   ┌────────────────────────────────────┐   │   │
+  │   │   │         roz_control                │   │   │
+  │   │   │  (motor control runtime, 1000Hz)   │   │   │
+  │   │   │  ┌──────────────────────────────┐  │   │   │
+  │   │   │  │         roz_proto            │  │   │   │
+  │   │   │  └──────────────────────────────┘  │   │   │
   │   │   └──────────────────┬─────────────────┘   │   │
   │   └──────────────────────┼─────────────────────┘   │
   │                          │ UART (+ GPIO sync)      │
@@ -143,50 +150,73 @@ Each controller manages a set of actuators and sensors defined at compile time. 
 **Requirements:** [controller/requirements.md](../controller/requirements.md)
 **Module Design:** [controller/module_design.md](../controller/module_design.md)
 
-### 3.3 roz_host -- Base Station Host Library
+### 3.3 roz_control -- Motor Control Runtime
 
-**Language:** C (C99, POSIX)
-**Builds to:** Shared library (.so) for Python, static library (.a) for C consumers
-**OS dependencies:** Linux (POSIX threads, termios for UART)
+**Language:** C/C++
+**Builds to:** Shared library (.so), static library (.a)
+**OS dependencies:** Linux (POSIX threads, termios for UART, real-time scheduling)
 
-The host-side counterpart to the embedded controller. Manages one or more controller connections, provides a thread-safe command API, dispatches telemetry via callbacks, and exposes a C API designed for Python wrapping.
+The motor control runtime. Owns the real-time control loop (1000Hz), motor skill execution, and all controller communication. Exposes a pure C API -- it contains no Python code. Consumers (roz_server) call into the C API via ctypes; the FFI bridge lives in the consumer, not in roz_control.
 
-Links against roz_proto for all protocol operations. Adds:
-- Linux transport backends (UART, USB, future TCP)
-- Background receive thread per connection
-- Ack/nack tracking with timeouts
+Links against roz_proto for all protocol operations. Provides:
+- 1000Hz control policy execution loop (scripted and learned policies)
+- Motor skill management (skill name → policy mapping)
+- Driver module: Linux transport backends (UART, USB, future TCP), background receive thread per connection, ack/nack tracking with timeouts
 - Multi-controller connection management
 - Clock synchronization (protocol-based and GPIO-based implementations)
-- Python bindings (cffi or ctypes)
+- Telemetry aggregation and callback dispatch
 
-**Requirements:** [host_lib/requirements.md](../host_lib/requirements.md)
+The 1000Hz loop runs in its own thread internally. Callers interact at the directive rate (1-5Hz for LLM output, or on-demand for manual commands) and register callbacks for telemetry. The fast path never crosses the ABI boundary.
 
-### 3.4 roz_ai -- AI System
+**Requirements:** [control/requirements.md](../control/requirements.md)
+
+### 3.4 roz_server -- Server Daemon
+
+**Language:** Python
+**Target:** Jetson Orin Nano (aarch64) for production, x86_64 for development
+**Builds to:** Python package
+
+The central daemon process that runs on the SBC (production) or development machine (development). Loads roz_control as a shared library via ctypes and serves as the single entry point for all higher-level components.
+
+Key responsibilities:
+- Loads and manages roz_control (.so) via C ABI
+- Hosts roz_ai as an embedded component (optional -- can run without AI for manual control and testing)
+- Serves roz_ui over the network (provides robot state, AI introspection, accepts operator commands)
+- Mode management: AI mode (full autonomous operation) vs. manual mode (operator-driven, no AI)
+- Aggregates state from both roz_control (robot/controller telemetry) and roz_ai (AI introspection, perception status, reasoning state) into a unified view for roz_ui
+
+roz_server is the process the operator starts. Everything else -- the AI system, the control runtime, controller connections -- is managed by it.
+
+**Requirements:** TBD
+
+### 3.5 roz_ai -- AI System
 
 **Language:** Python
 **Target:** NVIDIA Jetson Orin Nano (8GB, 40 TOPS)
-**Key dependencies:** Gemma4 (multimodal LLM), TTS model, roz_host Python API
+**Key dependencies:** Gemma4 (multimodal LLM), TTS model, roz_control (via C ABI through roz_server)
 
-The robot's cognitive core. Runs a continuous perception-reasoning-action loop: ingests raw audio, downsampled camera frames, and controller telemetry; reasons about the environment using a multimodal LLM (Gemma4); and produces actions (speech, motion, expressions) executed through roz_host.
+The robot's cognitive core. Runs a continuous perception-reasoning-action loop: ingests raw audio, downsampled camera frames, and controller telemetry; reasons about the environment using a multimodal LLM (Gemma4); and produces actions (speech, motion, expressions) executed through roz_control.
+
+roz_ai runs as an embedded component within roz_server. It does not directly load roz_control -- it accesses the control runtime through roz_server's internal interfaces. This means roz_ai can be enabled or disabled without changing how roz_control operates.
 
 The system is always on -- no wake word or activation trigger. It maintains continuous audio and visual awareness, manages conversational state, and generates idle behaviors when not actively engaged.
 
 Key components:
 - Perception pipeline (audio, vision, telemetry preprocessing)
 - Core reasoning (Gemma4 multimodal LLM inference)
-- Action generation (motor skills via control policies, jaw synchronization)
+- Action generation (semantic motor skill directives)
 - TTS pipeline (on-device text-to-speech)
 - Behavior manager (personality, conversation state, attention)
 - Safety layer (content filtering, command validation)
 
 **Requirements:** [ai/requirements.md](../ai/requirements.md)
 
-### 3.5 roz_ui -- Operator Interface (Future)
+### 3.6 roz_ui -- Operator Interface (Future)
 
 **Language:** Python
 **Framework:** Textual (terminal UI)
 
-Terminal-based UI for robot operation. Displays telemetry, allows manual actuator control, shows system status, and provides AI system debug visibility. Communicates with controllers through roz_host's Python API.
+Terminal-based UI for robot operation. Displays telemetry, allows manual actuator control, shows system status, and provides AI system debug visibility. Connects to roz_server over the network -- this gives it access to both robot state (from roz_control) and AI introspection (from roz_ai) through a single connection.
 
 **Requirements:** [ui/requirements.md](../ui/requirements.md)
 
@@ -195,25 +225,33 @@ Terminal-based UI for robot operation. Displays telemetry, allows manual actuato
 ## 4. Dependency Graph
 
 ```
-  roz_ai (Python, SBC)       roz_ui (Python)
-      │                          │
-      │ Python API               │ Python API
-      ├──────────────┬───────────┘
-      │              │
-      ▼              ▼
-  roz_host (C, Linux)
+  roz_ui (Python)
       │
-      │ C API
+      │ network
       ▼
-  roz_proto (C, portable)
+  roz_server (Python, SBC)
+      │
+      │ hosts
+      ▼
+  roz_ai (Python, optional)
+      │
+      │ via roz_server
+      ▼
+  roz_control (C/C++, .so)  ◄── loaded via C ABI (ctypes)
+      │
+      │ links
+      ▼
+  roz_proto (C, portable, .a)
       │                  │
       │ source/link      │ source/link
       ▼                  ▼
-  roz_host internals   roz_firmware
-                       (embedded firmware)
+  roz_control           roz_firmware
+  (internals)           (embedded firmware)
 ```
 
-Dependencies flow strictly downward. roz_proto has no upward dependencies -- it is a pure library. roz_host depends on roz_proto but not on any specific controller firmware. roz_ai and roz_ui both consume roz_host's Python API independently -- roz_ai drives the robot's behavior, roz_ui provides operator visibility and manual control.
+Dependencies flow strictly downward. roz_proto has no upward dependencies -- it is a pure library. roz_control links roz_proto and provides the motor control runtime as a shared library with a pure C API. roz_server loads roz_control via ctypes and hosts roz_ai as an optional component. roz_ui connects to roz_server over the network -- it never talks to roz_control or roz_ai directly.
+
+roz_ai does not have a direct dependency on roz_control. It sends semantic directives (motor skills, speech) and receives telemetry through roz_server's internal interfaces. This allows roz_server to operate without roz_ai (manual control mode) and allows roz_ai to be swapped or restarted independently.
 
 ---
 
@@ -231,20 +269,20 @@ A robot may have multiple embedded controllers, each managing a disjoint set of 
 
 Each controller has a unique identifier within the robot. This identifier is established during the version handshake -- the handshake payload should be extended to include a controller ID field so the host can distinguish controllers.
 
-### 5.2 Host-Side Management
+### 5.2 Control-Side Management
 
-The host library manages each controller as an independent connection with its own:
-- Transport instance
+roz_control manages each controller as an independent connection with its own:
+- Transport instance (driver module)
 - Handshake state
 - Sequence number counter
 - Telemetry callback set
 - Ack tracking state
 
-The host API addresses commands to a specific controller handle. The host library does not perform cross-controller coordination -- that is the responsibility of the application layer (UI, ROS2 node) which can issue synchronized commands to multiple controllers.
+The roz_control API addresses commands to a specific controller handle. roz_control does not perform cross-controller coordination at the transport level -- the 1000Hz control loop can issue coordinated commands to multiple controllers as part of a single motor skill execution.
 
 ### 5.3 Shared Protocol
 
-All controllers speak the same wire protocol (roz_proto). A controller's device registry defines which actuator IDs and sensor IDs it owns. Actuator IDs are scoped per-controller -- actuator 0 on the head controller is unrelated to actuator 0 on an arm controller. The host library's controller handle disambiguates.
+All controllers speak the same wire protocol (roz_proto). A controller's device registry defines which actuator IDs and sensor IDs it owns. Actuator IDs are scoped per-controller -- actuator 0 on the head controller is unrelated to actuator 0 on an arm controller. roz_control's controller handle disambiguates.
 
 ---
 
@@ -256,7 +294,7 @@ Two clock synchronization strategies are supported, selectable at connection tim
 
 Available when the host is an SBC with GPIO access to the controller. The SBC drives a hardware sync pulse, and the controller latches it with a timer input capture. Achieves microsecond-level accuracy.
 
-This is the mechanism defined in [wire_protocol.md](../protocol/wire_protocol.md) Section 7.7 and controller requirement CTRL-R30. Requires:
+This is the mechanism defined in [wire_protocol.md](../protocol/wire_protocol.md) Section 7.7 and controller requirement MCU-R30. Requires:
 - Physical GPIO connection between SBC and controller
 - Linux GPIO access on the host (e.g., libgpiod)
 - Timer input capture configured on the controller
@@ -273,40 +311,52 @@ The host computes offset using the standard NTP-style half-round-trip estimation
 
 ### 6.3 Strategy Selection
 
-The host library selects the clock sync strategy per connection:
+roz_control selects the clock sync strategy per connection:
 - If GPIO is available and configured, use GPIO-based sync.
 - Otherwise, fall back to protocol-based sync.
 - The application may also disable clock sync entirely if not needed.
 
-Both strategies produce the same output: a clock offset that maps controller timestamps to host time. Consumers of telemetry data do not need to know which strategy is in use.
+Both strategies produce the same output: a clock offset that maps controller timestamps to host time. Consumers of telemetry data (roz_ai, roz_ui via roz_server) do not need to know which strategy is in use.
 
 ---
 
 ## 7. AI System
 
-The AI system (roz_ai) is the robot's cognitive core. It runs on the SBC (Jetson Orin Nano) and operates a continuous perception-reasoning-action loop for the full duration the robot is powered on.
+The AI system (roz_ai) is the robot's cognitive core. It runs within roz_server on the SBC (Jetson Orin Nano) and operates a continuous perception-reasoning-action loop for the full duration the robot is powered on.
 
 ```
   ┌───────────────────────────────────────────────────────────┐
-  │                     roz_ai (SBC)                          │
+  │                     roz_ai (within roz_server)            │
   │                                                           │
-  │  audio, video,    ┌──────────────┐    actuator commands,  │
-  │  telemetry ──────▶│  Multimodal  │──────▶ speech audio,   │
-  │  (via roz_host)   │  LLM (Gemma4)│      expressions      │
-  │                   └──────┬───────┘      (via roz_host)    │
+  │  audio, video,    ┌──────────────┐    semantic directives │
+  │  telemetry ──────▶│  Multimodal  │──────▶ (motor skills,  │
+  │  (via roz_control) │  LLM (Gemma4)│      speech, express.)│
+  │                   └──────┬───────┘      (via roz_control) │
   │                          │                                │
   │          ┌───────────────┼───────────────┐                │
   │          ▼               ▼               ▼                │
   │    ┌──────────┐   ┌───────────┐   ┌───────────┐          │
-  │    │ Behavior │   │    TTS    │   │   Motor   │          │
-  │    │ Manager  │   │ Pipeline  │   │  Skills   │          │
+  │    │ Behavior │   │    TTS    │   │  Safety   │          │
+  │    │ Manager  │   │ Pipeline  │   │  Layer    │          │
   │    └──────────┘   └───────────┘   └───────────┘          │
+  └───────────────────────────────────────────────────────────┘
+                              │
+                              │ semantic directives (C ABI)
+                              ▼
+  ┌───────────────────────────────────────────────────────────┐
+  │                    roz_control                            │
+  │                                                           │
+  │  ┌────────────────────────────────────────────────────┐   │
+  │  │  1000Hz Control Loop                               │   │
+  │  │  directive + proprioceptive state → actuator cmds   │   │
+  │  │  (scripted policies, learned policies)              │   │
+  │  └────────────────────────────────────────────────────┘   │
   └───────────────────────────────────────────────────────────┘
 ```
 
-The perception pipeline fuses audio, camera frames, and controller telemetry into a multimodal context for each inference cycle. The LLM produces structured output that the action generation layer parses into motor commands, speech, and expressions, all executed through roz_host's Python API.
+The perception pipeline fuses audio, camera frames, and controller telemetry into a multimodal context for each inference cycle. The LLM produces structured output that the action generation layer parses into semantic motor skill directives. These directives flow down to roz_control, which executes them at 1000Hz via its control policy loop -- translating high-level commands ("nod", "track person at bearing 30") into per-timestep actuator commands.
 
-The system has no wake word or activation trigger -- it maintains continuous sensory awareness, manages conversational state, and generates idle behaviors when not actively engaged. A behavior manager governs personality, attention, and turn-taking. A safety layer filters LLM output before it reaches the actuators.
+The system has no wake word or activation trigger -- it maintains continuous sensory awareness, manages conversational state, and generates idle behaviors when not actively engaged. A behavior manager governs personality, attention, and turn-taking. A safety layer filters LLM output before directives reach roz_control.
 
 All GPU-intensive workloads (LLM inference, TTS) run on the Jetson's GPU. The system manages shared GPU scheduling between these pipelines.
 
@@ -325,12 +375,16 @@ ROS2 is a system-level concern, not owned by any single project. The integration
   │  ROS2 Node  │  (C++ or Python node, future project)
   │  (driver)   │
   └──────┬──────┘
-         │ roz_host API
+         │ C ABI or via roz_server
          ▼
-     roz_host
+     roz_control
 ```
 
-A ROS2 driver node will use roz_host's API (either the C API from a C++ node, or the Python API from a Python node) to bridge between ROS2 topics/services and the robot's controllers. The driver node is a thin translation layer -- roz_host owns the connection lifecycle, protocol handling, and telemetry dispatch.
+A ROS2 driver node will bridge between ROS2 topics/services and the robot's controllers. Two integration paths are available:
+- **C++ node**: Links roz_control directly and calls its C API. Lowest latency, suitable for real-time control topics.
+- **Python node**: Connects through roz_server, which already manages roz_control. Simpler, suitable for telemetry and non-real-time topics.
+
+The driver node is a thin translation layer -- roz_control owns the connection lifecycle, protocol handling, and telemetry dispatch.
 
 The wire protocol (roz_proto) is designed so that its message types map naturally to ROS2 message/service patterns:
 - Actuator commands -> ROS2 action or service calls
@@ -338,7 +392,7 @@ The wire protocol (roz_proto) is designed so that its message types map naturall
 - Emergency stop -> ROS2 service
 - Streams -> ROS2 topics with QoS for real-time data
 
-The ROS2 driver node is out of scope for now. The design of roz_host should facilitate it but not depend on ROS2.
+The ROS2 driver node is out of scope for now. The design of roz_control should facilitate it but not depend on ROS2.
 
 ---
 
@@ -353,7 +407,7 @@ All project documentation lives in this repository (`roz_docs/`):
 | `controller/requirements.md` | Embedded controller firmware requirements. |
 | `controller/module_design.md` | Embedded controller module and type design. |
 | `proto_lib/requirements.md` | Shared protocol library requirements. |
-| `host_lib/requirements.md` | Base station host library requirements. |
+| `control/requirements.md` | Motor control runtime requirements. |
 | `ai/requirements.md` | AI system requirements. |
 | `ui/requirements.md` | Operator UI requirements. |
 
@@ -367,13 +421,15 @@ Individual project repositories contain only code, build configuration, and a pr
 
 Earlier designs had the controller firmware and base station each implementing their own protocol parsing. This creates a maintenance burden and a class of bugs where the two sides disagree on message layout, field order, or enum values. A single shared implementation eliminates this. The cost -- building a portable C library that works on both Cortex-M0+ and Linux -- is low, since the protocol layer is already pure C with no OS dependencies.
 
-### 10.2 Why C
+### 10.2 Why C and C++
 
-The embedded controller requires C (bare metal Cortex-M0+, 8KB RAM). The shared protocol library must therefore be C. The host library is also C to provide the cleanest possible Python FFI surface (no C++ name mangling, no Rust toolchain dependency). The UI is Python, using the host library via cffi or ctypes.
+The embedded controller requires C (bare metal Cortex-M0+, 8KB RAM). The shared protocol library must therefore be C. roz_control uses C++ for the motor control runtime -- C++ provides the facilities needed for control policy management (ONNX runtime for learned policies, policy containers, skill registries) while the lower layers (driver module, protocol handling via roz_proto) remain pure C.
+
+roz_control exposes a pure C API (extern "C" functions, no C++ types in the public interface). This makes the ABI stable and callable from any language. roz_server loads roz_control as a shared library via ctypes -- the FFI bridge code lives in roz_server, not in roz_control. This keeps roz_control language-agnostic: it doesn't know or care that its caller is Python.
 
 ### 10.3 Multi-Controller vs. Multi-Robot
 
-The system is designed for one robot with multiple controllers, not multiple robots. Each controller manages a disjoint set of actuators/sensors on the same physical robot. Cross-robot coordination (if ever needed) would be handled at the ROS2 layer, not in roz_host.
+The system is designed for one robot with multiple controllers, not multiple robots. Each controller manages a disjoint set of actuators/sensors on the same physical robot. Cross-robot coordination (if ever needed) would be handled at the ROS2 layer, not in roz_control.
 
 ### 10.4 Naming
 

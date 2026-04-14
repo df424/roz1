@@ -1,6 +1,6 @@
 # ROZ (Robot Orchestration Zero) - Documentation
 
-ROZ is a robotic home assistant platform with actuated features, audio I/O, and a camera. The system is composed of multiple projects -- embedded controllers, a shared protocol library, a host-side communications library, and an operator interface -- that communicate via a custom binary protocol.
+ROZ is a robotic home assistant platform with actuated features, audio I/O, and a camera. The system is composed of multiple projects -- embedded controllers, a shared protocol library, a C/C++ motor control runtime, a Python server daemon, a compound AI system, and an operator interface -- that communicate via a custom binary protocol.
 
 This documentation covers the full system design, wire protocol specification, and per-project requirements.
 
@@ -23,9 +23,13 @@ This documentation covers the full system design, wire protocol specification, a
 
 - [Requirements](proto_lib/requirements.md) -- Portable C library implementing the wire protocol. COBS, CRC, framing, message serialization, handshake logic. Shared between embedded firmware and host library.
 
-## Host Library (roz_host)
+## Motor Control Runtime (roz_control)
 
-- [Requirements](host_lib/requirements.md) -- *(in progress)* Linux host library for managing controller connections. Transport backends, threading, multi-controller support, ack tracking, clock synchronization, and Python bindings.
+- [Requirements](control/requirements.md) -- *(planned)* C/C++ motor control runtime. 1000Hz control policy loop, driver module (transport backends, connection management), multi-controller support, ack tracking, clock synchronization. Pure C API, no Python code.
+
+## Server Daemon (roz_server)
+
+- Requirements -- *(planned)* Python server daemon running on the SBC. Hosts roz_ai, loads roz_control via C ABI, serves roz_ui over network. Supports AI and manual control modes.
 
 ## AI System (roz_ai)
 

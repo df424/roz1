@@ -710,7 +710,7 @@ Telemetry messages include a `controller_time_us` field (from `pal_tick_us()`) s
 
 ## 13. Clock Sync
 
-Manages hardware-assisted clock synchronization between the controller and companion computer (CTRL-R30). Uses the PAL input capture to timestamp sync pulses with cycle-accurate precision.
+Manages hardware-assisted clock synchronization between the controller and companion computer (MCU-R30). Uses the PAL input capture to timestamp sync pulses with cycle-accurate precision.
 
 ```c
 typedef struct {
