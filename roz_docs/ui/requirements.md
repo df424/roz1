@@ -6,7 +6,7 @@ This document defines the requirements for the operator terminal UI. roz_ui is a
 
 ### 1.1 Scope
 
-This project covers the **terminal user interface only**. roz_ui consumes robot state via roz_host's Python API. It does not implement protocol logic, actuator control algorithms, or AI reasoning -- those are handled by roz_proto, roz_firmware, and roz_ai respectively.
+This project covers the **terminal user interface only**. roz_ui consumes robot state via roz_server's network API. It does not implement protocol logic, actuator control algorithms, or AI reasoning -- those are handled by roz_proto, roz_firmware, roz_control, and roz_ai respectively.
 
 ### 1.2 System Context
 
@@ -18,20 +18,18 @@ This project covers the **terminal user interface only**. roz_ui consumes robot 
                       │  │            roz_ui               │  │
                       │  │  (Textual TUI, this project)    │  │
                       │  └───────────────┬────────────────┘  │
-                      │                  │ Python API         │
-                      │  ┌───────────────┴────────────────┐  │
-                      │  │           roz_host              │  │
-                      │  │  (host library, multi-robot)    │  │
-                      │  └───────────────┬────────────────┘  │
                       └──────────────────┼──────────────────┘
-                                         │ wire protocol
+                                         │ network
                           ┌──────────────┼──────────────┐
-                          │    Robot(s)   │              │
+                          │    Robot     │              │
                           │              ▼              │
                           │  ┌────────────────────┐     │
-                          │  │  SBC (roz_ai)      │     │
+                          │  │  SBC               │     │
+                          │  │  roz_server        │     │
+                          │  │   └─ roz_ai        │     │
+                          │  │   └─ roz_control   │     │
                           │  └────────┬───────────┘     │
-                          │           │                 │
+                          │           │ UART            │
                           │  ┌────────┴───────────┐     │
                           │  │  Controller(s)     │     │
                           │  │  (roz_firmware)    │     │
@@ -45,7 +43,7 @@ This project covers the **terminal user interface only**. roz_ui consumes robot 
 - [Wire Protocol](../protocol/wire_protocol.md) -- the underlying protocol (for understanding telemetry and state semantics).
 - [Controller Requirements](../controller/requirements.md) -- embedded controller capabilities and state model.
 - [AI System Requirements](../ai/requirements.md) -- AI system state and observability (UI-R40-R42).
-- [Host Library Requirements](../host_lib/requirements.md) -- the API through which roz_ui receives robot state and issues commands.
+- [Server Requirements](../server/requirements.md) -- the server daemon through which roz_ui receives robot state and issues commands.
 
 ---
 
@@ -164,12 +162,12 @@ This project covers the **terminal user interface only**. roz_ui consumes robot 
 ### 2.10 Connection and Configuration
 
 **UI-R18 - Configuration-Driven Connections**: Robot connections shall be driven by a configuration file:
-  - (a) The configuration file shall specify all robots the UI should connect to, including connection parameters sufficient for roz_host to establish communication.
+  - (a) The configuration file shall specify all robots the UI should connect to, including connection parameters sufficient for roz_server to establish communication.
   - (b) On startup, the UI shall read the configuration file and begin connecting to all configured robots.
   - (c) The UI shall not require restart to detect robots -- but the initial robot inventory is defined by the configuration file.
 
-**UI-R19 - State Advertisement**: Each connected robot (via roz_host) shall push its full state to the UI:
-  - (a) roz_host shall advertise all robot state, settings, controller inventories, actuator/sensor registries, and telemetry to the UI without the UI needing to poll or request it.
+**UI-R19 - State Advertisement**: Each connected robot (via roz_server) shall push its full state to the UI:
+  - (a) roz_server shall advertise all robot state, AI system state, controller inventories, actuator/sensor registries, and telemetry to the UI without the UI needing to poll or request it.
   - (b) The UI shall update its views in real time as state updates are received.
   - (c) Commands from the UI to the robot shall be sent asynchronously and shall not block the UI while awaiting acknowledgment.
 
@@ -200,7 +198,7 @@ roz_ui is built on the [Textual](https://textual.textualize.io/) framework for P
 
 ### 3.3 Push-Based Data Model
 
-The UI is a passive consumer of state. Robots push telemetry and state updates to the UI via roz_host; the UI does not poll. This simplifies the UI's responsibilities (render what you're told, don't ask for it) and aligns with the wire protocol's event-driven telemetry model. Commands flow in the opposite direction -- the UI pushes commands asynchronously to the robot.
+The UI is a passive consumer of state. Robots push telemetry, AI state, and state updates to the UI via roz_server; the UI does not poll. This simplifies the UI's responsibilities (render what you're told, don't ask for it) and aligns with the wire protocol's event-driven telemetry model. Commands flow in the opposite direction -- the UI pushes commands asynchronously to the robot via roz_server.
 
 ### 3.4 Multi-Robot Support
 

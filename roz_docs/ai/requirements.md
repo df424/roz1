@@ -6,7 +6,7 @@ This document defines the requirements for roz_ai, the compound AI system that s
 
 ### 1.1 Scope
 
-This project covers the AI system running on the SBC: perception pipeline, core reasoning loop, action generation, text-to-speech, behavior management, and safety. It does **not** cover the wire protocol, controller firmware, or host library -- those are separate projects that roz_ai consumes via roz_host's Python API.
+This project covers the AI system running on the SBC: perception pipeline, core reasoning loop, action generation, text-to-speech, behavior management, and safety. It does **not** cover the wire protocol, controller firmware, or motor control runtime -- those are separate projects. roz_ai runs within roz_server and accesses the robot hardware through roz_control (via C ABI).
 
 ### 1.2 System Context
 
@@ -58,9 +58,9 @@ This project covers the AI system running on the SBC: perception pipeline, core 
 └─────────┼──────────────┼─────────────────────────────────┘
           │              │
           ▼              ▼
-      roz_host       roz_host
-     (actuator      (audio stream
-      commands)      to speaker)
+      roz_control    roz_control
+     (semantic       (audio stream
+      directives)    to speaker)
 ```
 
 ### 1.3 Reference Hardware
@@ -72,7 +72,7 @@ The system shall be designed to run the largest feasible Gemma4 model on this ha
 ### 1.4 Reference Documents
 
 - [System Architecture](../system/architecture.md) -- system context and project relationships.
-- [Host Library Requirements](../host/requirements.md) -- the API through which roz_ai controls the robot.
+- [Control Runtime Requirements](../control/requirements.md) -- the motor control runtime through which roz_ai controls the robot.
 - [Wire Protocol](../protocol/wire_protocol.md) -- the underlying protocol (for understanding telemetry and command semantics).
 
 ---
@@ -88,7 +88,7 @@ The system shall be designed to run the largest feasible Gemma4 model on this ha
   - (b) Construct a model context combining perceptual input with behavioral state (personality, conversation history, robot state).
   - (c) Invoke the core LLM for inference.
   - (d) Parse the model's output into actionable directives (speech, motion, expression, internal state updates).
-  - (e) Execute actions through roz_host and update internal state.
+  - (e) Execute actions through roz_control and update internal state.
 
 **AI-R3 - Responsiveness**: The AI loop shall be designed to minimize perceived latency between a stimulus (e.g., a person speaking) and the robot's response (e.g., beginning to reply). The system shall prioritize beginning a response quickly over waiting for complete input processing. Where the model and pipeline support it, streaming inference and incremental action execution shall be used.
 
@@ -96,18 +96,18 @@ The system shall be designed to run the largest feasible Gemma4 model on this ha
 
 ### 2.2 Perception Pipeline
 
-**AI-R5 - Audio Perception**: The system shall continuously capture audio from the robot's microphone via roz_host and present it to the core LLM.
+**AI-R5 - Audio Perception**: The system shall continuously capture audio from the robot's microphone via roz_control and present it to the core LLM.
   - (a) Audio shall be fed directly to the model in its native format without speech-to-text conversion. The multimodal LLM is the speech recognizer.
   - (b) The perception pipeline shall segment audio into chunks suitable for the model's input requirements (chunk size and overlap are implementation-defined based on the model's capabilities).
   - (c) The pipeline shall implement voice activity detection (VAD) to distinguish speech from silence and ambient noise. VAD output shall be available to the behavior manager to inform attention and turn-taking decisions.
   - (d) When no speech is detected, the system may reduce the frequency of audio-inclusive inference cycles to conserve compute, while maintaining visual and telemetry awareness.
 
-**AI-R6 - Visual Perception**: The system shall continuously receive camera frames from the robot's camera via roz_host and present them to the core LLM.
+**AI-R6 - Visual Perception**: The system shall continuously receive camera frames from the robot's camera via roz_control and present them to the core LLM.
   - (a) Frames shall be downsampled to a resolution suitable for the model's vision input. The target resolution shall balance perceptual fidelity against inference cost.
   - (b) The pipeline shall feed frames to the model at a configurable rate (e.g., 1-5 fps). The rate may be adaptive -- increasing when visual activity is detected, decreasing during static scenes.
   - (c) The pipeline should implement basic scene change detection to prioritize feeding new frames when the visual environment changes, rather than at a fixed interval.
 
-**AI-R7 - Telemetry Perception**: The system shall receive controller telemetry via roz_host and incorporate it into the model's context.
+**AI-R7 - Telemetry Perception**: The system shall receive controller telemetry via roz_control and incorporate it into the model's context.
   - (a) Telemetry shall be formatted as structured text describing the robot's physical state: actuator positions, active motions, fault conditions, system status.
   - (b) Telemetry updates shall be included in the model context at each reasoning cycle, giving the LLM awareness of the robot's current physical configuration.
   - (c) Significant state changes (fault, emergency stop, controller disconnect) shall be flagged as high-priority context for immediate model attention.
@@ -142,7 +142,7 @@ The system shall be designed to run the largest feasible Gemma4 model on this ha
   - (e) **Attention**: Directives about what to focus on visually (e.g., "look at the person speaking").
 
 **AI-R13 - Motor Skills**: The action generation layer shall translate semantic motor skill directives from the LLM into actuator commands via a control policy abstraction.
-  - (a) Each motor skill shall be identified by name and accept a set of parameters. The control policy shall map (skill name, parameters, current robot state) to actuator commands executable via roz_host.
+  - (a) Each motor skill shall be identified by name and accept a set of parameters. The control policy shall map (skill name, parameters, current robot state) to actuator commands executable via roz_control.
   - (b) Motor skills shall be composable -- multiple skills may execute concurrently on different actuators (e.g., nodding while speaking).
   - (c) The system shall support multiple control policy implementations behind a common interface, including at minimum scripted policies (parameterized sequences of actuator commands) and learned policies (neural network controllers).
   - (d) The LLM shall be informed of available motor skills and their parameters via the system prompt so it can reference them by name.
@@ -151,7 +151,7 @@ The system shall be designed to run the largest feasible Gemma4 model on this ha
 
 **AI-R14 - Speech Output**: When the LLM produces speech text, the action generation layer shall:
   - (a) Feed the text to the TTS pipeline (AI-R19) to produce audio.
-  - (b) Stream the resulting audio to the robot's speaker via roz_host.
+  - (b) Stream the resulting audio to the robot's speaker via roz_control.
   - (c) Generate synchronized jaw movements that track the audio envelope, using the protocol's sync tag mechanism to coordinate jaw actuator commands with audio stream data.
   - (d) Support interruption -- if new high-priority input arrives while the robot is speaking (e.g., the human interrupts), the system shall be able to halt speech output and jaw motion and begin processing the new input.
 
@@ -167,7 +167,7 @@ The system shall be designed to run the largest feasible Gemma4 model on this ha
   - (b) The TTS model shall run on the Jetson GPU, sharing resources with the core LLM. The system shall manage GPU memory and scheduling to avoid contention.
   - (c) The TTS pipeline should support streaming synthesis -- beginning audio output before the full text is available -- to reduce perceived latency when paired with streaming LLM inference.
 
-**AI-R17 - TTS Audio Format**: The TTS pipeline shall produce audio in a format compatible with roz_host's audio streaming interface.
+**AI-R17 - TTS Audio Format**: The TTS pipeline shall produce audio in a format compatible with roz_control's audio streaming interface.
   - (a) Output format shall match one of the sample formats defined in the wire protocol (e.g., PCM signed 16-bit).
   - (b) Sample rate shall be configurable and compatible with the controller's audio output hardware.
 
@@ -213,7 +213,7 @@ The system shall be designed to run the largest feasible Gemma4 model on this ha
 
 **AI-R25 - Output Safety**: The system shall filter the LLM's output to ensure the robot behaves appropriately.
   - (a) Speech output shall be screened for content that is inappropriate for a home environment (configurable content policy).
-  - (b) Motion commands shall be validated against actuator limits before execution. The safety layer shall not rely solely on the controller's limit enforcement -- it shall reject obviously invalid commands before they reach roz_host.
+  - (b) Motion commands shall be validated against actuator limits before execution. The safety layer shall not rely solely on the controller's limit enforcement -- it shall reject obviously invalid commands before they reach roz_control.
   - (c) The system shall enforce rate limits on actuator commands to prevent the LLM from generating rapid, erratic motion that could damage hardware or appear alarming.
 
 **AI-R26 - Operational Safety**: The system shall maintain safe operation under failure conditions.
@@ -379,8 +379,8 @@ The memory system uses a two-stage pipeline: capture then extract.
 
 ### 3.8 Relationship to ROS2
 
-roz_ai does not depend on ROS2 directly. It communicates with the robot through roz_host's Python API. A future ROS2 integration could either:
-- Run roz_ai as a ROS2 node that publishes/subscribes to topics (wrapping roz_host calls in ROS2 message types).
+roz_ai does not depend on ROS2 directly. It communicates with the robot through roz_control (via C ABI through roz_server). A future ROS2 integration could either:
+- Run roz_ai as a ROS2 node that publishes/subscribes to topics (wrapping roz_control calls in ROS2 message types).
 - Keep roz_ai independent and run a separate bridge node.
 
 The AI system's architecture does not need to change for either approach.
@@ -393,12 +393,12 @@ The motor control architecture follows a two-tier hierarchy: a slow reasoning ti
 
 The reasoning tier (the LLM) runs at 1-5 Hz, bounded by inference latency. Each cycle, it observes the robot's perceptual state and produces high-level motor skill directives -- e.g., "nod with amplitude 0.7", "track the person at bearing 30 degrees", "express surprise." These directives are semantic: they describe *what* the robot should do, not the per-timestep actuator trajectory.
 
-The execution tier (the control policy) runs at 50-200 Hz, matching the controller's servo update rate. Each cycle, it consumes:
+The execution tier (the control policy) runs at 1000 Hz within roz_control's real-time thread. Each cycle, it consumes:
 - The current motor skill directive and its parameters (the conditioning signal from the LLM).
 - Proprioceptive state: current actuator positions and velocities (from controller telemetry).
 - Optionally, exteroceptive signals (e.g., audio envelope for jaw sync).
 
-It outputs actuator commands (target positions, velocities) for the current timestep, which are sent to the controller(s) via roz_host.
+It outputs actuator commands (target positions, velocities) for the current timestep, which are sent to the controller(s) by roz_control's driver module.
 
 The fast loop runs continuously even between LLM cycles. When the LLM issues a new directive, the execution tier transitions smoothly to the new behavior. When no new directive arrives, the execution tier continues executing the last directive or returns to an idle policy.
 
@@ -425,7 +425,7 @@ Scripted policies serve three roles:
 The target architecture replaces scripted policies with neural network controllers trained via reinforcement learning in simulation. The training path:
 
 1. **Simulation environment:** NVIDIA Isaac Sim provides a physics-accurate simulation of the robot's kinematic chain (neck, eyes, jaw). Domain randomization covers actuator response variation, latency, and mechanical slop.
-2. **Policy architecture:** A small MLP or recurrent network (sized to run at 200 Hz on the Jetson's GPU or CPU) that maps (proprioceptive state, conditioning signal) to actuator commands.
+2. **Policy architecture:** A small MLP or recurrent network (sized to run at 1000 Hz on the Jetson's CPU within roz_control) that maps (proprioceptive state, conditioning signal) to actuator commands.
 3. **Conditioning signal:** The policy is conditioned on the LLM's semantic directive. Initially this is a one-hot skill identifier plus a parameter vector. A future extension may use a language embedding as the conditioning signal, enabling the policy to generalize to novel directives not seen during training.
 4. **Reward shaping:** Task-specific rewards (e.g., for "track person" -- minimize gaze error to target bearing; for "nod" -- match a reference head trajectory while maintaining smooth motion). A universal penalty for jerk and actuator limit violations encourages smooth, hardware-safe motion.
 5. **Sim-to-real transfer:** Policies trained in Isaac Sim are exported as ONNX or TorchScript and deployed to the Jetson. Domain randomization during training and a brief real-world fine-tuning phase (optional) bridge the sim-to-real gap.

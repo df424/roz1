@@ -2,7 +2,7 @@
 
 ## 1. Overview
 
-This document defines the requirements for roz_proto, a shared C library that implements the ROZ binary wire protocol defined in [wire_protocol.md](../protocol/wire_protocol.md). The library is linked by both the embedded controller firmware (roz_firmware) and the base station host library (roz_host), ensuring a single authoritative implementation of the protocol.
+This document defines the requirements for roz_proto, a shared C library that implements the ROZ binary wire protocol defined in [wire_protocol.md](../protocol/wire_protocol.md). The library is linked by both the embedded controller firmware (roz_firmware) and the motor control runtime (roz_control), ensuring a single authoritative implementation of the protocol.
 
 ### 1.1 Scope
 
@@ -14,7 +14,7 @@ The library is a codec and state machine library. It transforms between typed C 
 
 ```
 ┌───────────────────────────────────────────────────┐
-│            Caller (roz_host or roz_firmware)       │
+│            Caller (roz_control or roz_firmware)     │
 │                                                   │
 │  ┌─ raw bytes from transport ──┐  ┌─ messages ──┐ │
 │  │                             │  │ to send     │ │
@@ -54,7 +54,7 @@ The library is a codec and state machine library. It transforms between typed C 
 
 **PROTO-R3 - No Dynamic Memory Allocation**: The library shall not call `malloc`, `calloc`, `realloc`, `free`, or any other dynamic memory allocator. All state and buffer storage shall be provided by the caller via context structs or shall be compile-time configurable static allocations within caller-owned structs.
 
-**PROTO-R4 - Re-entrancy**: All library functions shall be re-entrant. The library shall not use file-scoped static mutable variables. All mutable state shall reside in caller-owned context structs passed by pointer. This enables the host library to manage multiple simultaneous controller connections, each with independent protocol state.
+**PROTO-R4 - Re-entrancy**: All library functions shall be re-entrant. The library shall not use file-scoped static mutable variables. All mutable state shall reside in caller-owned context structs passed by pointer. This enables roz_control to manage multiple simultaneous controller connections, each with independent protocol state.
 
 **PROTO-R5 - Configurable Buffer Sizes**: Buffer sizes (maximum frame size, COBS accumulation buffer, etc.) shall be configurable via compile-time defines with sensible defaults. This allows the embedded target to use minimal buffers while the host target uses larger ones.
 
@@ -121,7 +121,7 @@ The library is a codec and state machine library. It transforms between typed C 
 
 ### 2.6 Protocol Type Definitions
 
-**PROTO-R17 - Canonical Type Definitions**: The library shall define the canonical C types for all protocol entities, serving as the single source of truth for both the embedded firmware and the host library. This includes:
+**PROTO-R17 - Canonical Type Definitions**: The library shall define the canonical C types for all protocol entities, serving as the single source of truth for both the embedded firmware and the motor control runtime. This includes:
   - (a) Identifier typedefs: `actuator_id_t`, `sensor_id_t`, `device_id_t`, `stream_id_t`, `seq_num_t`, `msg_type_t`, `sync_tag_t`, `controller_id_t`.
   - (b) Frame header struct.
   - (c) A message payload struct for each message type.
@@ -129,7 +129,7 @@ The library is a codec and state machine library. It transforms between typed C 
   - (e) Message type ID constants for all message types.
   - (f) Flags field constants and extraction macros.
 
-**PROTO-R18 - Type Stability**: Protocol type definitions shall be organized in dedicated headers separate from implementation code. Consumers (roz_firmware, roz_host) include these headers directly. Changes to type definitions constitute a protocol change and shall be coordinated across all consumers.
+**PROTO-R18 - Type Stability**: Protocol type definitions shall be organized in dedicated headers separate from implementation code. Consumers (roz_firmware, roz_control) include these headers directly. Changes to type definitions constitute a protocol change and shall be coordinated across all consumers.
 
 ### 2.7 Fragmentation
 
@@ -181,7 +181,7 @@ The library is a codec and state machine library. It transforms between typed C 
 
 **PROTO-R26 - Sync Tag Handling**: The dispatch function shall inspect the `sync_tag` field of incoming messages.
   - (a) If `sync_tag` is 0x0000, the message shall be dispatched to the appropriate handler immediately.
-  - (b) If `sync_tag` is non-zero, the message shall be forwarded to a caller-provided sync buffer callback instead of the normal handler. The caller (roz_host or roz_firmware) owns sync group buffering and execution policy.
+  - (b) If `sync_tag` is non-zero, the message shall be forwarded to a caller-provided sync buffer callback instead of the normal handler. The caller (roz_control or roz_firmware) owns sync group buffering and execution policy.
 
 ### 2.11 Convenience Builders
 
@@ -218,7 +218,7 @@ The existing controller module design ([module_design.md](../controller/module_d
 
 ### 3.2 What Stays in the Caller
 
-The following responsibilities remain with the caller (roz_host or roz_firmware), not roz_proto:
+The following responsibilities remain with the caller (roz_control or roz_firmware), not roz_proto:
 
 - **Transport I/O**: Reading bytes from UART/USB/SPI, writing encoded frames to the transport.
 - **Timeout management**: Detecting stalled fragment reassembly, handshake timeout, disconnect detection. The library has no concept of time.
@@ -240,7 +240,7 @@ ROZ_COBS_BUF_SIZE       -- COBS accumulation buffer (default: ROZ_MAX_FRAME_SIZE
 ROZ_MAX_HANDLERS        -- max registered message handlers (default: 16)
 ```
 
-The host library overrides these with larger values at compile time.
+roz_control overrides these with larger values at compile time.
 
 ### 3.5 Endianness
 
