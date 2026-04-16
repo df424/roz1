@@ -403,6 +403,7 @@ All project documentation lives in this repository (`roz_docs/`):
 | Path | Contents |
 |---|---|
 | `system/architecture.md` | This document. System context, project relationships. |
+| `system/sensorimotor_architecture.md` | Sensorimotor tier: three-tier control architecture for lifelike behavior. |
 | `protocol/wire_protocol.md` | Binary wire protocol specification. |
 | `controller/requirements.md` | Embedded controller firmware requirements. |
 | `controller/module_design.md` | Embedded controller module and type design. |
