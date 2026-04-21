@@ -43,6 +43,9 @@ This documentation covers the full system design, wire protocol specification, a
 - [Requirements](implementations/p1_head/requirements.md) -- P1-specific requirements: behavioral realism, actuator performance, power supply, calibration, mechanical constraints, safety, and platform requirement deviations.
 - [Design](implementations/p1_head/design.md) -- P1 design: motor skill policies (gaze, jaw sync, idle), calibration data structures, actuator and electrical design, controller PAL configuration and timing budget, safety parameters, jaw-audio synchronization.
 - [Implementation](implementations/p1_head/implementation.md) -- Hardware selections (STM32G071RB, Jetson Orin Nano), peripheral architecture, bandwidth analysis, control loop design, oversampled telemetry, and MCU migration path.
+- **Audio Subsystem:**
+  - [Requirements](implementations/p1_head/audio/requirements.md) -- Speaker output (SPL, latency, hardware mute), microphone input (capture, barge-in, DOA), duplex operation.
+  - [Design](implementations/p1_head/audio/design.md) -- USB DAC + Class D amp speaker chain, USB stereo mic chain, AEC architecture, e-stop mute, enclosure acoustics, BOM.
 
 ## Operator Interface (roz_ui)
 

@@ -17,6 +17,8 @@ The P1 system has three major subsystems, corresponding to the platform's two-ti
 ### 1.2 Reference Documents
 
 - [P1 requirements](requirements.md) (P1-R*)
+- [P1 audio requirements](audio/requirements.md) (P1A-R*)
+- [P1 audio design](audio/design.md)
 - [P1 implementation specification](implementation.md)
 - [Sensorimotor architecture](../../system/sensorimotor_architecture.md) -- aspirational three-tier evolution (not implemented in P1)
 - [Controller module design](../../controller/module_design.md)
