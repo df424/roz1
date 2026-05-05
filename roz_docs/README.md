@@ -9,6 +9,7 @@ This documentation covers the full system design, wire protocol specification, a
 ## System
 
 - [Architecture](system/architecture.md) -- System topology, project inventory, deployment configurations, multi-controller design, clock synchronization strategy, and ROS2 integration path.
+- [Sensorimotor Architecture](system/sensorimotor_architecture.md) -- Three-tier control architecture for lifelike behavior. Reactive controllers, priority arbitration, sensor-motor coordination patterns. Aspirational evolution of the two-tier model.
 
 ## Protocol
 
@@ -34,6 +35,17 @@ This documentation covers the full system design, wire protocol specification, a
 ## AI System (roz_ai)
 
 - [Requirements](ai/requirements.md) -- Compound AI system with multimodal LLM (Gemma4) at the core. Continuous perception loop (audio, vision, telemetry), action generation, TTS, behavior management, and safety. Runs on the SBC.
+
+## Implementations
+
+### P1 Head (Prototype 1)
+
+- [Requirements](implementations/p1_head/requirements.md) -- P1-specific requirements: behavioral realism, actuator performance, power supply, calibration, mechanical constraints, safety, and platform requirement deviations.
+- [Design](implementations/p1_head/design.md) -- P1 design: motor skill policies (gaze, jaw sync, idle), calibration data structures, actuator and electrical design, controller PAL configuration and timing budget, safety parameters, jaw-audio synchronization.
+- [Implementation](implementations/p1_head/implementation.md) -- Hardware selections (STM32G071RB, Jetson Orin Nano), peripheral architecture, bandwidth analysis, control loop design, oversampled telemetry, and MCU migration path.
+- **Audio Subsystem:**
+  - [Requirements](implementations/p1_head/audio/requirements.md) -- Speaker output (SPL, latency, hardware mute), microphone input (capture, barge-in, DOA), duplex operation.
+  - [Design](implementations/p1_head/audio/design.md) -- USB DAC + Class D amp speaker chain, USB stereo mic chain, AEC architecture, e-stop mute, enclosure acoustics, BOM.
 
 ## Operator Interface (roz_ui)
 

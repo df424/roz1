@@ -141,7 +141,9 @@ This hardware configuration is for reference only. The firmware design shall not
 
 **MCU-R22 - Low Latency Operation**: The system shall be designed to minimize latency across all paths (command execution, audio, video) such that the robot behaves as an embodied presence rather than a remote-controlled device. Buffering and processing strategies shall prioritize responsiveness.
 
-**MCU-R23 - Update Loop Period**: The controller's main loop shall execute at a period of 1 ms or less. All tick functions (actuator interpolation, sync management, telemetry, system monitoring) shall complete within this period. This ensures smooth actuator interpolation and responsive command processing.
+**MCU-R23 - Update Loop Period**: The controller's main loop shall execute at a period of 1 ms or less (1 kHz or faster). All tick functions (actuator interpolation, sync management, telemetry, system monitoring) shall complete within this period. This ensures smooth actuator interpolation and responsive command processing.
+  - (a) Actuator interpolation shall run every tick, regardless of whether a new host command has been received.
+  - (b) Actuator bus I/O (writing positions, reading status) shall be scheduled within the main loop at rates appropriate to the actuator type and bus bandwidth, not necessarily every tick (see MCU-R32).
 
 ### 2.9 Actuator Behavior
 
@@ -173,7 +175,16 @@ This hardware configuration is for reference only. The firmware design shall not
 
 **MCU-R30 - Initial Transport**: The first transport implementation shall be UART. The PAL transport interface (MCU-R1, MCU-R13) shall be implemented over UART as the reference transport for development and testing. The UART configuration (baud rate, pin assignment) shall be defined in the platform abstraction layer.
 
-### 2.15 Clock Synchronization
+### 2.15 Actuator Bus Architecture
+
+**MCU-R32 - Serial Actuator Bus**: The controller shall support communication with smart actuators via serial bus protocols (e.g., Dynamixel Protocol 2.0, Feetech SCS/STS).
+  - (a) The controller shall support at least one half-duplex serial bus for actuator communication.
+  - (b) The controller should support multiple independent parallel buses to enable concurrent communication with different actuator groups, reducing per-tick bus time.
+  - (c) Bus topology (shared bus vs parallel buses) shall be configurable per implementation based on the actuator latency requirements of each joint group.
+  - (d) The controller shall support sync_write (or equivalent bulk-write) operations to update all actuators on a bus in a single transaction.
+  - (e) Actuator status reads (position, load, temperature, errors) may be scheduled at a lower rate than position writes, to free bus bandwidth for commands.
+
+### 2.16 Clock Synchronization
 
 **MCU-R31 - Cross-System Clock Synchronization**: The controller shall support hardware-assisted clock synchronization with the companion computer to enable correlation of controller telemetry with SBC-side data (e.g., video frames, audio timestamps). The mechanism shall use:
   - (a) A dedicated GPIO sync line between the companion computer and the controller.
@@ -202,3 +213,43 @@ Firmware update (e.g., bootloader support) is out of scope for the initial desig
 ### 3.4 MCU Constraints
 
 The current target MCU (STM32L031K6, 32KB Flash, 8KB RAM) is severely resource-constrained. Streaming audio/video and running multiple interpolation loops concurrently may require upgrading to a more capable MCU, or offloading media streaming to the companion processor. The hardware abstraction layer (MCU-R1) supports this architectural flexibility.
+
+### 3.5 Execution Rate and Inter-Setpoint Interpolation
+
+MCU-R23 requires the controller execution loop at 1 kHz or faster, matching the host command rate. This is the minimum: every host command produces at least one interpolation step and one actuator update.
+
+Implementations should consider running the execution loop faster than 1 kHz (e.g., 10 kHz) to improve motion quality through inter-setpoint interpolation. At 10 kHz, the controller interpolates between successive 1 kHz setpoints, producing 10 intermediate positions per command. Benefits:
+
+- **Smoother motion:** A 20 ms saccade gets 200 interpolation steps at 10 kHz vs 20 at 1 kHz.
+- **Lower worst-case latency:** A new command is picked up within 100 us, not 1 ms.
+- **Decoupled I/O scheduling:** The main loop runs fast for interpolation and monitoring; bus I/O is scheduled on a subset of ticks based on actuator needs.
+
+The actuator bus write rate is bounded by the bus bandwidth and the actuator's internal control loop rate, not by the main loop rate. For example, a servo with a 1 kHz internal PID benefits from commands at 1 kHz but not 10 kHz -- the extra interpolation steps produce smoother trajectories on the controller side that are sampled at the bus write rate.
+
+### 3.6 Actuator Bus Topology Guidance
+
+The choice between a shared bus and parallel buses depends on the number of actuators, the bus speed, and the latency requirements of each joint. The key constraint is fitting all bus I/O within the available time budget per tick.
+
+**Bus timing at 4 Mbps TTL (Dynamixel Protocol 2.0):**
+
+| Operation | Bytes (approx.) | Time at 4 Mbps |
+|---|---|---|
+| Sync write, 2 servos (position) | ~21 bytes | ~53 us |
+| Sync write, 4 servos (position) | ~31 bytes | ~78 us |
+| Status read, 1 servo (position + load + temp) | ~42 bytes round-trip | ~125 us |
+
+**Example configurations:**
+
+| Config | Actuators | Bus I/O per tick | Fits in 100 us tick? |
+|---|---|---|---|
+| 2 servos, 1 bus, write-only | sync write 2 | ~53 us | Yes |
+| 4 servos, 1 bus, write-only | sync write 4 | ~78 us | Yes (tight) |
+| 4 servos, 1 bus, write + read 1 | sync write + 1 read | ~203 us | No -- stagger reads across ticks |
+| 2 servos, 1 bus, write + read all | sync write + 2 reads | ~303 us | No -- schedule at 1 kHz (every 10th tick) |
+| 4 servos, 2 parallel buses (2+2), write + read all | 2x (sync write + 2 reads) parallel | ~303 us per bus, concurrent | Schedule at 1 kHz |
+
+**Guidance for implementers:**
+
+- **Fast actuators (eyes, fingers):** Low inertia joints that perform saccades and fine manipulation benefit from low-latency command delivery. Use a dedicated bus with minimal bus companions, or write-only at high rate with staggered reads. Consider a dedicated parallel bus per axis group.
+- **Slower actuators (neck, torso, large joints):** Higher inertia joints move over longer timescales (100-500 ms trajectories). Shared bus with multiple servos is acceptable; bus latency is a small fraction of the motion duration.
+- **Write rate vs read rate:** Position writes should match the actuator's internal control loop rate (typically 1 kHz). Status reads (position feedback, load, temperature) can run at 100-500 Hz without degrading control quality, freeing bus time for writes.
